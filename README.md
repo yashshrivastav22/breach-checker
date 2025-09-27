@@ -34,12 +34,12 @@ A high‑performance, privacy‑preserving password breach lookup service. Clien
 
 ## 🔐 How k‑Anonymity Works (Quick)
 1. Client computes `sha1(password)` → 40‑hex uppercase.
-2. Split into **prefix** = first *N* hex (default 8) and **suffix** = remaining 40−N.
+2. Split into **prefix** = first *N* hex (default 8) and **suffix** = remaining 40-N.
 3. Client calls `GET /range/{prefix}`.
 4. Server returns all `{suffix, count}` pairs for that prefix.
 5. Client checks locally if its suffix is present and reads the breach count.
 
-This keeps the full hash private — the server never sees it.
+This keeps the full hash private - the server never sees it.
 
 ---
 
@@ -56,20 +56,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3) Build the SQLite database from a **headerless** CSV
-Your CSV must have two columns per line: `SHA1_HEX,COUNT`, no header.
+### 3) You can download the csv from here or you can use your own csv file:
+[Kaggle SHA-1 dump](https://www.kaggle.com/datasets/yashshrivastav22/sha-1-password-hash-dump)
+
+### 4) Build the SQLite database from a **headerless** CSV
+This CSV have two columns per line: `SHA1_HEX,COUNT`, no header.
 
 ```bash
-# Example paths — adjust to your environment
+# Example paths - adjust to your environment
 CSV=/home/ubuntu/data/pwned.csv
 DB=./data/pwned.db
 mkdir -p ./data
-
 python ingest_to_sqlite.py --csv "$CSV" --db "$DB" --batch 200000
-# Script streams the file, commits in batches, and exits when done.
 ```
 
-### 4) Run the API
+Script streams the file, commits in batches, and exits when done.
+
+![csv_inject_into_sqlitedb](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/csv_inject_into_sqlitedb.PNG)
+
+
+### 5) Run the API
 ```bash
 export SQLITE_DB_PATH=./data/pwned.db
 export PREFIX_LEN=8                 # set 5 for HIBP-style
@@ -102,59 +108,200 @@ All responses are JSON unless otherwise noted.
 Basic liveness + DB stats.
 
 **200**
+
+**Output**
 ```json
 {
   "status": "ok",
   "stats": {
     "backend": "sqlite",
-    "db_path": "data/pwned.db",
-    "rows": 123456789,
+    "db_path": "./data/pwned.db",
+    "rows": 262974240,
     "prefix_len": 8,
     "cached": true
   }
 }
 ```
+![Health Status](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/health_status.PNG)
 
 ### `GET /range/{prefix}`
 Return all suffixes + counts for the given prefix (length = `PREFIX_LEN`).
 
+#### 1) Existence 8 prefix
+
 **200**
+
+**OutPut**
 ```json
 {
-  "prefix": "5BAA61E4",
+  "prefix": "0000003F",
   "suffixes": [
-    { "suffix": "C9B93F3F0682250B6CF8331B7EE68FD8", "count": 100 },
-    { "suffix": "...", "count": 1 }
+    {
+      "suffix": "2785CA62D59AB905EEAB3533EFFE337A",
+      "count": 15
+    },
+    {
+      "suffix": "A0BC80B317DDE176D6A71F6321CCD35E",
+      "count": 2
+    }
   ]
 }
 ```
+![Range Prefix 1](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/range_prefix_1.PNG)
 
-**400** if length is wrong or non-hex.
+#### 2) Non-existence 8 prefix
+
+**200**
+
+**OutPut**
+```json
+{
+  "prefix": "0000003A",
+  "suffixes": []
+}
+```
+![Range Prefix 2](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/range_prefix_2.PNG)
+
+#### 3) Invalid 8 prefix
+
+**400**
+
+**OutPut**
+```json
+{
+  "detail": "Prefix must be 8 hex characters"
+}
+```
+![Range Prefix 3](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/range_prefix_3.PNG)
+
 
 ### `POST /hash-check`
 Exact lookup by **full 40‑hex SHA‑1**.
 
+#### 1) Existence Hash Check:
+
+Generate the SHA-1 hash
+
+```bash
+printf '%s' 'usa123' | sha1sum | awk '{print toupper($1)}'
+```
+
+![Hash Generate 1](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/hash_generate_1.PNG)
+
+**200**
+
 **Request**
 ```json
-{ "sha1": "5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8" }
+curl -X 'POST' \
+  'http://100.25.217.94:8000/hash-check' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "sha1": "087F62B3D37E93191C2BB40336F41DE4DD9D3838"
+}'
 ```
+
 **Response**
 ```json
-{ "breached": true, "count": 100 }
+{
+  "breached": true,
+  "count": 38929
+}
 ```
+![Hash Check 1A](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/hash_check_1a.PNG)
+
+![Hash Check 1B](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/hash_check_1b.PNG)
+
+#### 2) Non-existence Hash Check
+
+Generate the SHA-1 hash
+
+```bash
+printf '%s' 'johndoe123' | sha1sum | awk '{print toupper($1)}'
+
+```
+![Hash Generate 2](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/hash_generate_2.PNG)
+
+**200**
+
+**Request**
+```json
+curl -X 'POST' \
+  'http://100.25.217.94:8000/hash-check' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "sha1": "AE2B299B1C065B186F8D50869097CBFF26EA283B"
+}'
+```
+
+**Response**
+```json
+{
+  "breached": false,
+  "count": 0
+}
+```
+![Hash Check 2A](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/hash_check_2a.PNG)
+
+![Hash Check 2B](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/hash_check_2b.PNG)
+
 
 ### `POST /check` (optional, disabled by default)
 Server‑side helper: send a raw password, server hashes and checks it.
 Enable with `ENABLE_DIRECT_PASSWORD_CHECK=true`.
 
+#### 1) Existence password check
+**200**
+
 **Request**
 ```json
-{ "password": "password" }
+curl -X 'POST' \
+  'http://100.25.217.94:8000/check' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "password": "tomjerry"
+}'
 ```
+
 **Response**
 ```json
-{ "breached": true, "count": 100 }
+{
+  "breached": true,
+  "count": 3774
+}
 ```
+
+![Password Check 1A](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/password_check_1a.PNG)
+
+![Password Check 1A](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/password_check_1a.PNG)
+
+#### 2) Non-existence password check
+**200**
+
+**Request**
+```json
+curl -X 'POST' \
+  'http://100.25.217.94:8000/check' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "password": "bunNy123"
+}'
+```
+
+**Response**
+```json
+{
+  "breached": false,
+  "count": 0
+}
+```
+
+![Password Check 2B](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/password_check_2a.PNG)
+
+![Password Check 2B](https://github.com/yashshrivastav22/Images/blob/main/breach-checker/password_check_2a.PNG)
 
 ### `POST /admin/reload`
 No‑op placeholder for SQLite (DB lives on disk). If `ADMIN_TOKEN` is set, include header:
@@ -208,10 +355,10 @@ curl -s -X POST http://localhost:8000/hash-check \
 ---
 
 ## 📄 License
-MIT — adjust as needed for your project.
+MIT - adjust as needed for your project.
 
 ---
 
-## 🙏 Acknowledgements
+## Acknowledgements
 - Inspired by the k‑anonymity model popularized by Have I Been Pwned (HIBP).
 
